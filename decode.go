@@ -19,16 +19,16 @@ const (
 	aliasNode
 )
 
-type node struct {
-	kind         int
-	line, column int
-	tag          string
+type Node struct {
+	Kind         int
+	Line, Column int
+	Tag          string
 	// For an alias node, alias holds the resolved alias.
-	alias    *node
-	value    string
-	implicit bool
-	children []*node
-	anchors  map[string]*node
+	Alias    *Node
+	Value    string
+	Implicit bool
+	Children []*Node
+	Anchors  map[string]*Node
 }
 
 // ----------------------------------------------------------------------------
@@ -37,7 +37,7 @@ type node struct {
 type parser struct {
 	parser   yaml_parser_t
 	event    yaml_event_t
-	doc      *node
+	doc      *Node
 	doneInit bool
 }
 
@@ -132,13 +132,13 @@ func (p *parser) fail() {
 	failf("%s%s", where, msg)
 }
 
-func (p *parser) anchor(n *node, anchor []byte) {
+func (p *parser) anchor(n *Node, anchor []byte) {
 	if anchor != nil {
-		p.doc.anchors[string(anchor)] = n
+		p.doc.Anchors[string(anchor)] = n
 	}
 }
 
-func (p *parser) parse() *node {
+func (p *parser) parse() *Node {
 	p.init()
 	switch p.peek() {
 	case yaml_SCALAR_EVENT:
@@ -159,62 +159,62 @@ func (p *parser) parse() *node {
 	}
 }
 
-func (p *parser) node(kind int) *node {
-	return &node{
-		kind:   kind,
-		line:   p.event.start_mark.line,
-		column: p.event.start_mark.column,
+func (p *parser) node(kind int) *Node {
+	return &Node{
+		Kind:   kind,
+		Line:   p.event.start_mark.line,
+		Column: p.event.start_mark.column,
 	}
 }
 
-func (p *parser) document() *node {
+func (p *parser) document() *Node {
 	n := p.node(documentNode)
-	n.anchors = make(map[string]*node)
+	n.Anchors = make(map[string]*Node)
 	p.doc = n
 	p.expect(yaml_DOCUMENT_START_EVENT)
-	n.children = append(n.children, p.parse())
+	n.Children = append(n.Children, p.parse())
 	p.expect(yaml_DOCUMENT_END_EVENT)
 	return n
 }
 
-func (p *parser) alias() *node {
+func (p *parser) alias() *Node {
 	n := p.node(aliasNode)
-	n.value = string(p.event.anchor)
-	n.alias = p.doc.anchors[n.value]
-	if n.alias == nil {
-		failf("unknown anchor '%s' referenced", n.value)
+	n.Value = string(p.event.anchor)
+	n.Alias = p.doc.Anchors[n.Value]
+	if n.Alias == nil {
+		failf("unknown anchor '%s' referenced", n.Value)
 	}
 	p.expect(yaml_ALIAS_EVENT)
 	return n
 }
 
-func (p *parser) scalar() *node {
+func (p *parser) scalar() *Node {
 	n := p.node(scalarNode)
-	n.value = string(p.event.value)
-	n.tag = string(p.event.tag)
-	n.implicit = p.event.implicit
+	n.Value = string(p.event.value)
+	n.Tag = string(p.event.tag)
+	n.Implicit = p.event.implicit
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_SCALAR_EVENT)
 	return n
 }
 
-func (p *parser) sequence() *node {
+func (p *parser) sequence() *Node {
 	n := p.node(sequenceNode)
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_SEQUENCE_START_EVENT)
 	for p.peek() != yaml_SEQUENCE_END_EVENT {
-		n.children = append(n.children, p.parse())
+		n.Children = append(n.Children, p.parse())
 	}
 	p.expect(yaml_SEQUENCE_END_EVENT)
 	return n
 }
 
-func (p *parser) mapping() *node {
+func (p *parser) mapping() *Node {
 	n := p.node(mappingNode)
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_MAPPING_START_EVENT)
 	for p.peek() != yaml_MAPPING_END_EVENT {
-		n.children = append(n.children, p.parse(), p.parse())
+		n.Children = append(n.Children, p.parse(), p.parse())
 	}
 	p.expect(yaml_MAPPING_END_EVENT)
 	return n
@@ -224,8 +224,8 @@ func (p *parser) mapping() *node {
 // Decoder, unmarshals a node into a provided value.
 
 type decoder struct {
-	doc     *node
-	aliases map[*node]bool
+	doc     *Node
+	aliases map[*Node]bool
 	mapType reflect.Type
 	terrors []string
 	strict  bool
@@ -246,15 +246,15 @@ var (
 
 func newDecoder(strict bool) *decoder {
 	d := &decoder{mapType: defaultMapType, strict: strict}
-	d.aliases = make(map[*node]bool)
+	d.aliases = make(map[*Node]bool)
 	return d
 }
 
-func (d *decoder) terror(n *node, tag string, out reflect.Value) {
-	if n.tag != "" {
-		tag = n.tag
+func (d *decoder) terror(n *Node, tag string, out reflect.Value) {
+	if n.Tag != "" {
+		tag = n.Tag
 	}
-	value := n.value
+	value := n.Value
 	if tag != yaml_SEQ_TAG && tag != yaml_MAP_TAG {
 		if len(value) > 10 {
 			value = " `" + value[:7] + "...`"
@@ -262,10 +262,10 @@ func (d *decoder) terror(n *node, tag string, out reflect.Value) {
 			value = " `" + value + "`"
 		}
 	}
-	d.terrors = append(d.terrors, fmt.Sprintf("line %d: cannot unmarshal %s%s into %s", n.line+1, shortTag(tag), value, out.Type()))
+	d.terrors = append(d.terrors, fmt.Sprintf("line %d: cannot unmarshal %s%s into %s", n.Line+1, shortTag(tag), value, out.Type()))
 }
 
-func (d *decoder) callUnmarshaler(n *node, u Unmarshaler) (good bool) {
+func (d *decoder) callUnmarshaler(n *Node, u Unmarshaler) (good bool) {
 	terrlen := len(d.terrors)
 	err := u.UnmarshalYAML(func(v interface{}) (err error) {
 		defer handleErr(&err)
@@ -294,8 +294,8 @@ func (d *decoder) callUnmarshaler(n *node, u Unmarshaler) (good bool) {
 // its types unmarshalled appropriately.
 //
 // If n holds a null value, prepare returns before doing anything.
-func (d *decoder) prepare(n *node, out reflect.Value) (newout reflect.Value, unmarshaled, good bool) {
-	if n.tag == yaml_NULL_TAG || n.kind == scalarNode && n.tag == "" && (n.value == "null" || n.value == "~" || n.value == "" && n.implicit) {
+func (d *decoder) prepare(n *Node, out reflect.Value) (newout reflect.Value, unmarshaled, good bool) {
+	if n.Tag == yaml_NULL_TAG || n.Kind == scalarNode && n.Tag == "" && (n.Value == "null" || n.Value == "~" || n.Value == "" && n.Implicit) {
 		return out, false, false
 	}
 	again := true
@@ -347,7 +347,7 @@ func allowedAliasRatio(decodeCount int) float64 {
 	}
 }
 
-func (d *decoder) unmarshal(n *node, out reflect.Value) (good bool) {
+func (d *decoder) unmarshal(n *Node, out reflect.Value) (good bool) {
 	d.decodeCount++
 	if d.aliasDepth > 0 {
 		d.aliasCount++
@@ -355,7 +355,7 @@ func (d *decoder) unmarshal(n *node, out reflect.Value) (good bool) {
 	if d.aliasCount > 100 && d.decodeCount > 1000 && float64(d.aliasCount)/float64(d.decodeCount) > allowedAliasRatio(d.decodeCount) {
 		failf("document contains excessive aliasing")
 	}
-	switch n.kind {
+	switch n.Kind {
 	case documentNode:
 		return d.document(n, out)
 	case aliasNode:
@@ -365,7 +365,7 @@ func (d *decoder) unmarshal(n *node, out reflect.Value) (good bool) {
 	if unmarshaled {
 		return good
 	}
-	switch n.kind {
+	switch n.Kind {
 	case scalarNode:
 		good = d.scalar(n, out)
 	case mappingNode:
@@ -373,28 +373,28 @@ func (d *decoder) unmarshal(n *node, out reflect.Value) (good bool) {
 	case sequenceNode:
 		good = d.sequence(n, out)
 	default:
-		panic("internal error: unknown node kind: " + strconv.Itoa(n.kind))
+		panic("internal error: unknown node kind: " + strconv.Itoa(n.Kind))
 	}
 	return good
 }
 
-func (d *decoder) document(n *node, out reflect.Value) (good bool) {
-	if len(n.children) == 1 {
+func (d *decoder) document(n *Node, out reflect.Value) (good bool) {
+	if len(n.Children) == 1 {
 		d.doc = n
-		d.unmarshal(n.children[0], out)
+		d.unmarshal(n.Children[0], out)
 		return true
 	}
 	return false
 }
 
-func (d *decoder) alias(n *node, out reflect.Value) (good bool) {
+func (d *decoder) alias(n *Node, out reflect.Value) (good bool) {
 	if d.aliases[n] {
 		// TODO this could actually be allowed in some circumstances.
-		failf("anchor '%s' value contains itself", n.value)
+		failf("anchor '%s' value contains itself", n.Value)
 	}
 	d.aliases[n] = true
 	d.aliasDepth++
-	good = d.unmarshal(n.alias, out)
+	good = d.unmarshal(n.Alias, out)
 	d.aliasDepth--
 	delete(d.aliases, n)
 	return good
@@ -408,14 +408,14 @@ func resetMap(out reflect.Value) {
 	}
 }
 
-func (d *decoder) scalar(n *node, out reflect.Value) bool {
+func (d *decoder) scalar(n *Node, out reflect.Value) bool {
 	var tag string
 	var resolved interface{}
-	if n.tag == "" && !n.implicit {
+	if n.Tag == "" && !n.Implicit {
 		tag = yaml_STR_TAG
-		resolved = n.value
+		resolved = n.Value
 	} else {
-		tag, resolved = resolve(n.tag, n.value)
+		tag, resolved = resolve(n.Tag, n.Value)
 		if tag == yaml_BINARY_TAG {
 			data, err := base64.StdEncoding.DecodeString(resolved.(string))
 			if err != nil {
@@ -449,7 +449,7 @@ func (d *decoder) scalar(n *node, out reflect.Value) bool {
 				// We let any value be unmarshaled into TextUnmarshaler.
 				// That might be more lax than we'd like, but the
 				// TextUnmarshaler itself should bowl out any dubious values.
-				text = []byte(n.value)
+				text = []byte(n.Value)
 			}
 			err := u.UnmarshalText(text)
 			if err != nil {
@@ -465,7 +465,7 @@ func (d *decoder) scalar(n *node, out reflect.Value) bool {
 			return true
 		}
 		if resolved != nil {
-			out.SetString(n.value)
+			out.SetString(n.Value)
 			return true
 		}
 	case reflect.Interface:
@@ -477,7 +477,7 @@ func (d *decoder) scalar(n *node, out reflect.Value) bool {
 			// timestamp-like values into interface{} will continue to
 			// see a string and not a time.Time.
 			// TODO(v3) Drop this.
-			out.Set(reflect.ValueOf(n.value))
+			out.Set(reflect.ValueOf(n.Value))
 		} else {
 			out.Set(reflect.ValueOf(resolved))
 		}
@@ -582,8 +582,8 @@ func settableValueOf(i interface{}) reflect.Value {
 	return sv
 }
 
-func (d *decoder) sequence(n *node, out reflect.Value) (good bool) {
-	l := len(n.children)
+func (d *decoder) sequence(n *Node, out reflect.Value) (good bool) {
+	l := len(n.Children)
 
 	var iface reflect.Value
 	switch out.Kind() {
@@ -606,7 +606,7 @@ func (d *decoder) sequence(n *node, out reflect.Value) (good bool) {
 	j := 0
 	for i := 0; i < l; i++ {
 		e := reflect.New(et).Elem()
-		if ok := d.unmarshal(n.children[i], e); ok {
+		if ok := d.unmarshal(n.Children[i], e); ok {
 			out.Index(j).Set(e)
 			j++
 		}
@@ -620,7 +620,7 @@ func (d *decoder) sequence(n *node, out reflect.Value) (good bool) {
 	return true
 }
 
-func (d *decoder) mapping(n *node, out reflect.Value) (good bool) {
+func (d *decoder) mapping(n *Node, out reflect.Value) (good bool) {
 	switch out.Kind() {
 	case reflect.Struct:
 		return d.mappingStruct(n, out)
@@ -657,14 +657,14 @@ func (d *decoder) mapping(n *node, out reflect.Value) (good bool) {
 	if out.IsNil() {
 		out.Set(reflect.MakeMap(outt))
 	}
-	l := len(n.children)
+	l := len(n.Children)
 	for i := 0; i < l; i += 2 {
-		if isMerge(n.children[i]) {
-			d.merge(n.children[i+1], out)
+		if isMerge(n.Children[i]) {
+			d.merge(n.Children[i+1], out)
 			continue
 		}
 		k := reflect.New(kt).Elem()
-		if d.unmarshal(n.children[i], k) {
+		if d.unmarshal(n.Children[i], k) {
 			kkind := k.Kind()
 			if kkind == reflect.Interface {
 				kkind = k.Elem().Kind()
@@ -673,8 +673,8 @@ func (d *decoder) mapping(n *node, out reflect.Value) (good bool) {
 				failf("invalid map key: %#v", k.Interface())
 			}
 			e := reflect.New(et).Elem()
-			if d.unmarshal(n.children[i+1], e) {
-				d.setMapIndex(n.children[i+1], out, k, e)
+			if d.unmarshal(n.Children[i+1], e) {
+				d.setMapIndex(n.Children[i+1], out, k, e)
 			}
 		}
 	}
@@ -682,15 +682,15 @@ func (d *decoder) mapping(n *node, out reflect.Value) (good bool) {
 	return true
 }
 
-func (d *decoder) setMapIndex(n *node, out, k, v reflect.Value) {
+func (d *decoder) setMapIndex(n *Node, out, k, v reflect.Value) {
 	if d.strict && out.MapIndex(k) != zeroValue {
-		d.terrors = append(d.terrors, fmt.Sprintf("line %d: key %#v already set in map", n.line+1, k.Interface()))
+		d.terrors = append(d.terrors, fmt.Sprintf("line %d: key %#v already set in map", n.Line+1, k.Interface()))
 		return
 	}
 	out.SetMapIndex(k, v)
 }
 
-func (d *decoder) mappingSlice(n *node, out reflect.Value) (good bool) {
+func (d *decoder) mappingSlice(n *Node, out reflect.Value) (good bool) {
 	outt := out.Type()
 	if outt.Elem() != mapItemType {
 		d.terror(n, yaml_MAP_TAG, out)
@@ -701,17 +701,17 @@ func (d *decoder) mappingSlice(n *node, out reflect.Value) (good bool) {
 	d.mapType = outt
 
 	var slice []MapItem
-	var l = len(n.children)
+	var l = len(n.Children)
 	for i := 0; i < l; i += 2 {
-		if isMerge(n.children[i]) {
-			d.merge(n.children[i+1], out)
+		if isMerge(n.Children[i]) {
+			d.merge(n.Children[i+1], out)
 			continue
 		}
 		item := MapItem{}
 		k := reflect.ValueOf(&item.Key).Elem()
-		if d.unmarshal(n.children[i], k) {
+		if d.unmarshal(n.Children[i], k) {
 			v := reflect.ValueOf(&item.Value).Elem()
-			if d.unmarshal(n.children[i+1], v) {
+			if d.unmarshal(n.Children[i+1], v) {
 				slice = append(slice, item)
 			}
 		}
@@ -721,13 +721,13 @@ func (d *decoder) mappingSlice(n *node, out reflect.Value) (good bool) {
 	return true
 }
 
-func (d *decoder) mappingStruct(n *node, out reflect.Value) (good bool) {
+func (d *decoder) mappingStruct(n *Node, out reflect.Value) (good bool) {
 	sinfo, err := getStructInfo(out.Type())
 	if err != nil {
 		panic(err)
 	}
 	name := settableValueOf("")
-	l := len(n.children)
+	l := len(n.Children)
 
 	var inlineMap reflect.Value
 	var elemType reflect.Type
@@ -742,9 +742,9 @@ func (d *decoder) mappingStruct(n *node, out reflect.Value) (good bool) {
 		doneFields = make([]bool, len(sinfo.FieldsList))
 	}
 	for i := 0; i < l; i += 2 {
-		ni := n.children[i]
+		ni := n.Children[i]
 		if isMerge(ni) {
-			d.merge(n.children[i+1], out)
+			d.merge(n.Children[i+1], out)
 			continue
 		}
 		if !d.unmarshal(ni, name) {
@@ -753,7 +753,7 @@ func (d *decoder) mappingStruct(n *node, out reflect.Value) (good bool) {
 		if info, ok := sinfo.FieldsMap[name.String()]; ok {
 			if d.strict {
 				if doneFields[info.Id] {
-					d.terrors = append(d.terrors, fmt.Sprintf("line %d: field %s already set in type %s", ni.line+1, name.String(), out.Type()))
+					d.terrors = append(d.terrors, fmt.Sprintf("line %d: field %s already set in type %s", ni.Line+1, name.String(), out.Type()))
 					continue
 				}
 				doneFields[info.Id] = true
@@ -764,16 +764,16 @@ func (d *decoder) mappingStruct(n *node, out reflect.Value) (good bool) {
 			} else {
 				field = out.FieldByIndex(info.Inline)
 			}
-			d.unmarshal(n.children[i+1], field)
+			d.unmarshal(n.Children[i+1], field)
 		} else if sinfo.InlineMap != -1 {
 			if inlineMap.IsNil() {
 				inlineMap.Set(reflect.MakeMap(inlineMap.Type()))
 			}
 			value := reflect.New(elemType).Elem()
-			d.unmarshal(n.children[i+1], value)
-			d.setMapIndex(n.children[i+1], inlineMap, name, value)
+			d.unmarshal(n.Children[i+1], value)
+			d.setMapIndex(n.Children[i+1], inlineMap, name, value)
 		} else if d.strict {
-			d.terrors = append(d.terrors, fmt.Sprintf("line %d: field %s not found in type %s", ni.line+1, name.String(), out.Type()))
+			d.terrors = append(d.terrors, fmt.Sprintf("line %d: field %s not found in type %s", ni.Line+1, name.String(), out.Type()))
 		}
 	}
 	return true
@@ -783,24 +783,24 @@ func failWantMap() {
 	failf("map merge requires map or sequence of maps as the value")
 }
 
-func (d *decoder) merge(n *node, out reflect.Value) {
-	switch n.kind {
+func (d *decoder) merge(n *Node, out reflect.Value) {
+	switch n.Kind {
 	case mappingNode:
 		d.unmarshal(n, out)
 	case aliasNode:
-		if n.alias != nil && n.alias.kind != mappingNode {
+		if n.Alias != nil && n.Alias.Kind != mappingNode {
 			failWantMap()
 		}
 		d.unmarshal(n, out)
 	case sequenceNode:
 		// Step backwards as earlier nodes take precedence.
-		for i := len(n.children) - 1; i >= 0; i-- {
-			ni := n.children[i]
-			if ni.kind == aliasNode {
-				if ni.alias != nil && ni.alias.kind != mappingNode {
+		for i := len(n.Children) - 1; i >= 0; i-- {
+			ni := n.Children[i]
+			if ni.Kind == aliasNode {
+				if ni.Alias != nil && ni.Alias.Kind != mappingNode {
 					failWantMap()
 				}
-			} else if ni.kind != mappingNode {
+			} else if ni.Kind != mappingNode {
 				failWantMap()
 			}
 			d.unmarshal(ni, out)
@@ -810,6 +810,6 @@ func (d *decoder) merge(n *node, out reflect.Value) {
 	}
 }
 
-func isMerge(n *node) bool {
-	return n.kind == scalarNode && n.value == "<<" && (n.implicit == true || n.tag == yaml_MERGE_TAG)
+func isMerge(n *Node) bool {
+	return n.Kind == scalarNode && n.Value == "<<" && (n.Implicit == true || n.Tag == yaml_MERGE_TAG)
 }
